@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>台灣綜合所得稅計算器 2025</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/decimal.js@10.4.3/decimal.min.js"></script>
+</head>
+<body class="bg-gradient-to-br from-blue-50 to-indigo-100 min-h-screen p-4">
+    <div id="app" class="max-w-4xl mx-auto"></div>
+
+    <script>
+        const Decimal = window.Decimal;
+        const D = Decimal;
+
+        // 稅率規則
+        const RULES = {
+            2025: {
+                brackets: [
+                    { max: 590000, rate: 0.05, ded: 0 },
+                    { max: 1330000, rate: 0.12, ded: 41300 },
+                    { max: 2660000, rate: 0.20, ded: 147700 },
+                    { max: 4980000, rate: 0.30, ded: 413700 },
+                    { max: Infinity, rate: 0.40, ded: 911700 }
+                ],
+                exemption: { self: 97000, dep: 97000, old: 145500 },
+                std: { single: 131000, married: 262000 },
+                special: { salary: 218000, edu: 27500, pre: 135000, elder: 135000 }
+            },
+            2026: {
+                brackets: [
+                    { max: 600000, rate: 0.05, ded: 0 },
+                    { max: 1350000, rate: 0.12, ded: 42000 },
+                    { max: 2700000, rate: 0.20, ded: 150000 },
+                    { max: 5060000, rate: 0.30, ded: 420000 },
+                    { max: Infinity, rate: 0.40, ded: 926000 }
+                ],
+                exemption: { self: 99000, dep: 99000, old: 148500 },
+                std: { single: 133000, married: 266000 },
+                special: { salary: 222000, edu: 28000, pre: 138000, elder: 138000 }
+            }
+        };
+
+        class TaxApp {
+            constructor() {
+                this.data = {
+                    year: 2025,
+                    salary: 800000, business: 0, rental: 0, interest: 50000,
+                    dividend: 120000, capital: 0, other: 0, overseas: 0,
+                    deps: 2, old: 0, married: false,
+                    useSalaryDed: true, eduCount: 0, preCount: 0, elderCount: 0
+                };
+                this.render();
+            }
+
+            calc() {
+                const r = RULES[this.data.year];
+                const total = D.sum(this.data.salary, this.data.business, this.data.rental, 
+                    this.data.interest, this.data.dividend, this.data.capital, this.data.other);
+
+                const exempt = D(r.exemption.self)
+                    .plus(D(this.data.deps).times(r.exemption.dep))
+                    .plus(D(this.data.old).times(r.exemption.old));
+
+                const stdDed = D(this.data.married ? r.std.married : r.std.single);
+
+                const specialDed = D(this.data.useSalaryDed ? r.special.salary : 0)
+                    .plus(D(this.data.eduCount).times(r.special.edu))
+                    .plus(D(this.data.preCount).times(r.special.pre))
+                    .plus(D(this.data.elderCount).times(r.special.elder));
+
+                const net = D.max(0, total.minus(exempt).minus(stdDed).minus(specialDed));
+
+                const bracket = r.brackets.find(b => net.lte(b.max));
+                const tax = net.times(bracket.rate).minus(bracket.ded);
+
+                // 股利二擇一
+                const divA = tax;
+                const divB = D(this.data.dividend).times(0.28);
+                const final = D.min(divA, divB);
+
+                // AMT
+                let amt = D(0);
+                if (D(this.data.overseas).gte(1000000)) {
+                    const amtBase = net.plus(this.data.overseas).minus(7500000);
+                    const amtTax = D.max(0, amtBase.times(0.20));
+                    amt = D.max(0, amtTax.minus(final));
+                }
+
+                return {
+                    total: total.toFixed(0),
+                    exempt: exempt.toFixed(0),
+                    stdDed: stdDed.toFixed(0),
+                    specialDed: specialDed.toFixed(0),
+                    net: net.toFixed(0),
+                    tax: tax.toFixed(0),
+                    divOpt: divB.lt(divA) ? '分開28%' : '合併計稅',
+                    final: final.toFixed(0),
+                    amt: amt.toFixed(0),
+                    totalTax: final.plus(amt).toFixed(0),
+                    rate: total.gt(0) ? final.plus(amt).div(total).times(100).toFixed(2) : '0'
+                };
+            }
+
+            update(key, val) {
+                this.data[key] = val;
+                this.render();
+            }
+
+            render() {
+                const res = this.calc();
+                document.getElementById('app').innerHTML = `
+                    <div class="bg-white rounded-2xl shadow-2xl p-8 space-y-6">
+                        <h1 class="text-4xl font-bold text-center bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent">
+                            台灣綜合所得稅計算器
+                        </h1>
+
+                        <div class="flex justify-center gap-4">
+                            <button onclick="app.update('year', 2025)" 
+                                class="px-6 py-2 rounded-lg font-bold ${this.data.year === 2025 ? 'bg-blue-600 text-white' : 'bg-gray-200'}">
+                                114年度
+                            </button>
+                            <button onclick="app.update('year', 2026)" 
+                                class="px-6 py-2 rounded-lg font-bold ${this.data.year === 2026 ? 'bg-blue-600 text-white' : 'bg-gray-200'}">
+                                115年度
+                            </button>
+                        </div>
+
+                        <div class="grid md:grid-cols-2 gap-4">
+                            ${this.input('薪資所得', 'salary')}
+                            ${this.input('營利所得', 'business')}
+                            ${this.input('租賃所得', 'rental')}
+                            ${this.input('利息所得', 'interest')}
+                            ${this.input('股利所得', 'dividend')}
+                            ${this.input('財產交易', 'capital')}
+                            ${this.input('其他所得', 'other')}
+                            ${this.input('海外所得', 'overseas')}
+                        </div>
+
+                        <div class="grid md:grid-cols-4 gap-4 pt-4 border-t">
+                            ${this.input('扶養人數', 'deps')}
+                            ${this.input('70歲↑', 'old')}
+                            <label class="flex items-center gap-2 p-4 bg-gray-50 rounded-lg">
+                                <input type="checkbox" ${this.data.married ? 'checked' : ''} 
+                                    onchange="app.update('married', this.checked)" class="w-5 h-5">
+                                <span class="font-bold">已婚</span>
+                            </label>
+                            <label class="flex items-center gap-2 p-4 bg-gray-50 rounded-lg">
+                                <input type="checkbox" ${this.data.useSalaryDed ? 'checked' : ''} 
+                                    onchange="app.update('useSalaryDed', this.checked)" class="w-5 h-5">
+                                <span class="font-bold">薪扣</span>
+                            </label>
+                        </div>
+
+                        <div class="grid md:grid-cols-3 gap-4">
+                            ${this.input('教育學費', 'eduCount')}
+                            ${this.input('幼兒', 'preCount')}
+                            ${this.input('長照', 'elderCount')}
+                        </div>
+
+                        <div class="bg-gradient-to-br from-blue-600 to-indigo-600 rounded-xl p-6 text-white">
+                            <h2 class="text-2xl font-bold mb-4">計算結果</h2>
+                            <div class="grid grid-cols-2 gap-3 text-sm">
+                                <div>總所得</div><div class="text-right font-bold">NT$ ${parseInt(res.total).toLocaleString()}</div>
+                                <div>免稅額</div><div class="text-right">-NT$ ${parseInt(res.exempt).toLocaleString()}</div>
+                                <div>標準扣除</div><div class="text-right">-NT$ ${parseInt(res.stdDed).toLocaleString()}</div>
+                                <div>特別扣除</div><div class="text-right">-NT$ ${parseInt(res.specialDed).toLocaleString()}</div>
+                                <div class="col-span-2 border-t border-white/30 pt-2 mt-2"></div>
+                                <div class="font-bold">綜所淨額</div><div class="text-right font-bold">NT$ ${parseInt(res.net).toLocaleString()}</div>
+                                <div>基本稅額</div><div class="text-right">NT$ ${parseInt(res.tax).toLocaleString()}</div>
+                                <div>股利優選</div><div class="text-right font-bold">${res.divOpt}</div>
+                                <div>應納稅額</div><div class="text-right">NT$ ${parseInt(res.final).toLocaleString()}</div>
+                                <div>AMT</div><div class="text-right">NT$ ${parseInt(res.amt).toLocaleString()}</div>
+                                <div class="col-span-2 border-t border-white/30 pt-3 mt-3"></div>
+                                <div class="col-span-2 text-center text-3xl font-bold bg-yellow-400 text-gray-900 rounded-lg p-4">
+                                    應繳 NT$ ${parseInt(res.totalTax).toLocaleString()}
+                                </div>
+                                <div class="col-span-2 text-center text-sm opacity-90 mt-2">
+                                    有效稅率 ${res.rate}%
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="flex gap-4 justify-center">
+                            <button onclick="app.export()" class="px-6 py-3 bg-green-600 text-white rounded-lg font-bold hover:bg-green-700">
+                                匯出 JSON
+                            </button>
+                            <button onclick="window.print()" class="px-6 py-3 bg-red-600 text-white rounded-lg font-bold hover:bg-red-700">
+                                列印
+                            </button>
+                            <button onclick="app.reset()" class="px-6 py-3 bg-gray-600 text-white rounded-lg font-bold hover:bg-gray-700">
+                                重置
+                            </button>
+                        </div>
+                    </div>
+                `;
+            }
+
+            input(label, key) {
+                return `
+                    <label class="block">
+                        <span class="text-sm font-bold text-gray-700">${label}</span>
+                        <input type="number" value="${this.data[key] || 0}" 
+                            oninput="app.update('${key}', parseFloat(this.value) || 0)"
+                            class="mt-1 block w-full px-4 py-2 rounded-lg border focus:ring-2 focus:ring-blue-500">
+                    </label>
+                `;
+            }
+
+            export() {
+                const json = JSON.stringify({ data: this.data, result: this.calc() }, null, 2);
+                const blob = new Blob([json], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `tax_${this.data.year}_${Date.now()}.json`;
+                a.click();
+                URL.revokeObjectURL(url);
+            }
+
+            reset() {
+                if (confirm('確定重置？')) {
+                    this.data = {
+                        year: 2025, salary: 0, business: 0, rental: 0, interest: 0,
+                        dividend: 0, capital: 0, other: 0, overseas: 0,
+                        deps: 0, old: 0, married: false,
+                        useSalaryDed: false, eduCount: 0, preCount: 0, elderCount: 0
+                    };
+                    this.render();
+                }
+            }
+        }
+
+        window.app = new TaxApp();
+    </script>
+</body>
+</html>
